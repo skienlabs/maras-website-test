@@ -1,0 +1,50 @@
+name: Build & Deploy Maras Website
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Authenticate to GCP
+      - name: Auth GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      # Configure Docker to use GCP Artifact Registry
+      - name: Configure Docker
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev
+
+      # Build the Nginx Docker image containing your HTML files
+      - name: Build image
+        run: |
+          docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/test-images/maras-site-test:latest .
+
+      # Push the image to GCP Artifact Registry
+      - name: Push image
+        run: |
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/test-images/maras-site-test:latest
+
+      # Deploy to your VM
+      - name: Deploy to VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            gcloud auth configure-docker us-central1-docker.pkg.dev -q
+            # Ensure the directory exists
+            mkdir -p ~/docker/maras-test
+            cd ~/docker/maras-test
+            # Pull the new image and restart the container
+            sudo docker compose pull
+            sudo docker compose up -d
